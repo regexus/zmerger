@@ -4,24 +4,6 @@ import cv2
 
 np.set_printoptions(linewidth=150, precision=4, suppress=True)
 
-IMAGES_DATA = [
-    {
-        "I" : r"e:\Programming\Python\Projects\2017\ZMerger\images\img1_RGBA.png", 
-        "Z" : r"e:\Programming\Python\Projects\2017\ZMerger\images\img1_Z.png", 
-        "M" : 2.0
-    }, 
-    {
-        "I" : r"e:\Programming\Python\Projects\2017\ZMerger\images\img2_RGBA.png", 
-        "Z" : r"e:\Programming\Python\Projects\2017\ZMerger\images\img2_Z.png", 
-        "M" : 1.0
-    }, 
-    {
-        "I" : r"e:\Programming\Python\Projects\2017\ZMerger\images\img3_RGBA.png", 
-        "Z" : r"e:\Programming\Python\Projects\2017\ZMerger\images\img3_Z.png", 
-        "M" : 0.0
-    },
-]
-
 def generate_pixel_stacks(images_data):
     """
     'images_data' is a list of dictionaties with image and mode information.
@@ -65,6 +47,7 @@ def generate_pixel_stacks(images_data):
         # Read the Z image
         z = cv2.imread(image_data["Z"], cv2.IMREAD_GRAYSCALE)
         z = z.reshape(i.shape[0], 1)
+
         # Set the range to 0..1 and convert to float
         z = z/(np.iinfo(z.dtype).max + 0.0)
 
@@ -87,17 +70,28 @@ def sort_by_z(pixel_stacks):
 
 def blend_pixels(pixel_info_src, pixel_info_dst):
     
+    dst_alpha = pixel_info_dst[3]
+    src_alpha = pixel_info_src[3]
+    out_alpha = dst_alpha + src_alpha*(1-dst_alpha)
+    src_rgb = pixel_info_src[:3]
+    dst_rgb = pixel_info_dst[:3]
+
     # Normal mode
     if pixel_info_dst[-1]==0.0:
-        pixel_info_dst[:3] = (1-pixel_info_dst[3])*pixel_info_src[:3] + pixel_info_dst[:3]*pixel_info_dst[3]
+        f = dst_rgb
 
+    # Multiply mode
     elif pixel_info_dst[-1]==1.0:
-        pixel_info_dst[:3] = pixel_info_src[:3] * pixel_info_dst[:3] *pixel_info_dst[3] + pixel_info_src[:3]*(1-pixel_info_dst[3])
+        f =  src_rgb * dst_rgb
 
+    # Screen mode
     elif pixel_info_dst[-1]==2.0:
-        pixel_info_dst[:3] = pixel_info_src[:3]/pixel_info_src[3] + pixel_info_dst[:3]#*pixel_info_dst[3]
+        f =  src_rgb + dst_rgb - src_rgb * dst_rgb
 
-    pixel_info_dst[3] = (1-pixel_info_dst[3])*pixel_info_src[3] + pixel_info_dst[3]
+    out_rgb = (1-dst_alpha/out_alpha)*src_rgb + (dst_alpha/out_alpha)*((1-src_alpha)*dst_rgb + src_alpha*f)
+
+    pixel_info_dst[:3] = out_rgb
+    pixel_info_dst[3] = out_alpha
 
 def compute_pixel_stack(pixel_stacks):
     """ A pixel stack is an array of arrays like this:
@@ -137,19 +131,3 @@ def compute_pixel_stack(pixel_stacks):
     #         blend_pixels(pixel_info_src, pixel_info_dst, mode)
 
     # pass
-
-# t = time()
-# pixel_stacks, image_width, image_heigth = generate_pixel_stacks(IMAGES_DATA)
-# print "generate_pixel_stacks", (time()-t)
-
-# t = time()
-# pixel_stacks = sort_by_z(pixel_stacks)
-# print "sort_by_z", (time()-t)
-
-# compute_pixel_stack(pixel_stacks)
-
-
-# out = pixel_stacks[:, 0, :4]
-# img = out.reshape(image_heigth, image_width, 4)
-# img = img*255
-# cv2.imwrite(r"e:\Programming\Python\Projects\2017\ZMerger\workspace\result.png", img)
