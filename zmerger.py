@@ -1,8 +1,100 @@
-from time import time
-import numpy as np
 import cv2
+import numpy as np
+from time import time
+from multiprocessing import Pool
+
+import pycuda.autoinit
+import pycuda.driver as drv
+from pycuda.compiler import SourceModule
+mod = SourceModule("""
+_global_ void blend_pixel_stacks(float* pixel_stacks_as_1d_array, int* image_count, float* output_image)
+{
+    int STACK_ITEM_DIM = 5; // RGBA + Mode
+    int img_count = image_count[0];
+    int stack_coord = (blockIdx.y*gridDim.x + blockIdx.x)*img_count*STACK_ITEM_DIM;
+    int new_image_pixel_block_coord = (blockIdx.y*gridDim.x + blockIdx.x)*4;
+
+    if (img_count>1)
+    {
+        // Starting from the second element in the stack (from the deeper side)
+        // The deepest element in the array was copied to the output image (as a starting point).
+        for (int img_ind=img_count-2; img_ind>-1; --img_ind)
+        {
+            float src_alpha = output_image[new_image_pixel_block_coord + 3]; // alpha value
+            float dst_alpha = pixel_stacks_as_1d_array[stack_coord+img_ind*STACK_ITEM_DIM+3]; // alpha value
+
+            // Early termination for black alpha
+            if (dst_alpha==0.0) continue;
+
+            float out_alpha = dst_alpha + src_alpha*(1-dst_alpha);
+            float f; // Compositing mode function value stored here
+
+            float mode = pixel_stacks_as_1d_array[stack_coord+img_ind*STACK_ITEM_DIM+4]; // mode value
+
+            float src_rgb = output_image[new_image_pixel_block_coord + threadIdx.x]; // rgb value
+            float dst_rgb = pixel_stacks_as_1d_array[stack_coord+ img_ind*STACK_ITEM_DIM+threadIdx.x]; // rgb value
+
+            // Normal mode
+            if (mode==0.0)
+                f = dst_rgb;
+
+            // Multiply mode
+            else if (mode==1.0)
+                f =  src_rgb * dst_rgb;
+
+            // Screen mode
+            else if (mode==2.0)
+                f =  src_rgb + dst_rgb - src_rgb * dst_rgb;
+
+            float out_rgb = (1-dst_alpha/out_alpha)*src_rgb + (dst_alpha/out_alpha)*((1-src_alpha)*dst_rgb + src_alpha*f);
+
+            output_image[new_image_pixel_block_coord+threadIdx.x] = out_rgb;
+            output_image[new_image_pixel_block_coord+3] = out_alpha;
+        }
+    }
+}
+""")
 
 np.set_printoptions(linewidth=150, precision=4, suppress=True)
+
+def normalize_to_float32(array):
+
+    max_value = np.iinfo(array.dtype).max
+    array = array.astype(np.float32, copy=False)
+    array /= max_value
+
+    return array
+
+def get_rgbazm_and_res(image_data):
+
+    # Read the RGBA image
+    rgba = cv2.imread(image_data["I"], cv2.IMREAD_UNCHANGED)
+    
+    # Saving the image resolution. Notice the order, height comes first!
+    image_heigth = rgba.shape[0]
+    image_width = rgba.shape[1]
+
+    # Normalize and resolve one dimension, 
+    # to make the image array two dimensional
+    rgba = normalize_to_float32(rgba)
+    rgba = rgba.reshape(image_width*image_heigth, rgba.shape[2])
+
+    # Read the Z image
+    z = cv2.imread(image_data["Z"], cv2.IMREAD_GRAYSCALE)
+
+    # Checking the z-pass resolution.
+    assert image_heigth == z.shape[0], "Resolution errror! Z-Pass does not match to RGBA."
+    assert image_width == z.shape[1], "Resolution errror! Z-Pass does not match to RGBA."
+
+    z = normalize_to_float32(z)
+    z = z.reshape(image_width*image_heigth, 1)
+
+    # Create an array from mode values
+    m = np.full_like(z, image_data["M"])
+   
+    rgbazm = np.hstack([rgba, z, m]).reshape(image_heigth*image_width, 1, 6)
+
+    return rgbazm, image_width, image_heigth
 
 def generate_pixel_stacks(images_data):
     """
@@ -22,43 +114,26 @@ def generate_pixel_stacks(images_data):
             }
         ]
     """
-    rgba_z_and_mode_datas = []
-
-    image_width = None
-    image_heigth = None 
+    rgbazm_datas = []
+    
+    first_image_width = None
+    first_image_heigth = None 
 
     for image_data in images_data:
 
-        # Read the RGBA image
-        i = cv2.imread(image_data["I"], cv2.IMREAD_UNCHANGED)
+        rgbazm, image_width, image_heigth = get_rgbazm_and_res(image_data)
 
-        # Checking and saving the image resolution. Notice the order, height comes first!
-        if image_heigth is not None:
-            assert image_heigth == len(i), "Image resolution error!"
-            assert image_width == len(i[0]), "Image resolution error!"
-        image_heigth = len(i)
-        image_width = len(i[0])
-
-        # Resolve one dimension, to make the image array two dimensional 
-        i = i.reshape(-1, i.shape[-1])
-        # Set the range to 0..1 and convert to float
-        i = i/(np.iinfo(i.dtype).max + 0.0)
-
-        # Read the Z image
-        z = cv2.imread(image_data["Z"], cv2.IMREAD_GRAYSCALE)
-        z = z.reshape(i.shape[0], 1)
-
-        # Set the range to 0..1 and convert to float
-        z = z/(np.iinfo(z.dtype).max + 0.0)
-
-        # Create an array from mode values
-        m = np.full_like(z, image_data["M"])
-       
-        # Put all the data of one image set together
-        rgba_z_and_mode_datas.append(np.hstack([i, z, m]).reshape(image_heigth*image_width, 1, 6))
+        # Checking the resolution consistance
+        if first_image_heigth is None:
+            first_image_heigth = image_heigth
+            first_image_width = image_width
+        assert first_image_heigth == image_heigth, "Image resolution error!"
+        assert first_image_width == image_width, "Image resolution error!"
+            
+        rgbazm_datas.append(rgbazm)
 
     # Generate the pixel stacks
-    pixel_stacks = np.column_stack(rgba_z_and_mode_datas)
+    pixel_stacks = np.column_stack(rgbazm_datas)
     return pixel_stacks, image_width, image_heigth
 
 def sort_by_z(pixel_stacks):
@@ -66,7 +141,8 @@ def sort_by_z(pixel_stacks):
     sorting_order = pixel_stacks[:, :, 4].argsort()
     rows = np.arange(pixel_stacks.shape[0]).reshape(pixel_stacks.shape[0], 1)
     columns = sorting_order
-    return pixel_stacks[rows, columns]
+    # Sort and get rid of z-component
+    return pixel_stacks[rows, columns][:, :, [0, 1, 2, 3, 5]]
 
 def blend_pixels(pixel_info_src, pixel_info_dst):
     
