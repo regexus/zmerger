@@ -2,25 +2,26 @@ import cv2
 import numpy as np
 from time import time
 from multiprocessing import Pool
+from concurrent import futures
 
 import pycuda.autoinit
 import pycuda.driver as drv
 from pycuda.compiler import SourceModule
 mod = SourceModule("""
-_global_ void blend_pixel_stacks(float* pixel_stacks_as_1d_array, int* image_count, float* output_image)
+_%_global_%_ void blend_pixel_stacks(float* pixel_stacks_as_1d_array, int* image_count)
 {
     int STACK_ITEM_DIM = 5; // RGBA + Mode
     int img_count = image_count[0];
     int stack_coord = (blockIdx.y*gridDim.x + blockIdx.x)*img_count*STACK_ITEM_DIM;
-    int new_image_pixel_block_coord = (blockIdx.y*gridDim.x + blockIdx.x)*4;
 
     if (img_count>1)
     {
-        // Starting from the second element in the stack (from the deeper side)
-        // The deepest element in the array was copied to the output image (as a starting point).
-        for (int img_ind=img_count-2; img_ind>-1; --img_ind)
+        // Starting from the first element in the stack (from the deeper side)
+        // The first element will contain the result after every iteration.
+        for (int img_ind=img_count-1; img_ind>-1; --img_ind)
         {
-            float src_alpha = output_image[new_image_pixel_block_coord + 3]; // alpha value
+
+            float src_alpha = pixel_stacks_as_1d_array[stack_coord+(img_count-1)*STACK_ITEM_DIM+3]; // alpha value
             float dst_alpha = pixel_stacks_as_1d_array[stack_coord+img_ind*STACK_ITEM_DIM+3]; // alpha value
 
             // Early termination for black alpha
@@ -31,8 +32,8 @@ _global_ void blend_pixel_stacks(float* pixel_stacks_as_1d_array, int* image_cou
 
             float mode = pixel_stacks_as_1d_array[stack_coord+img_ind*STACK_ITEM_DIM+4]; // mode value
 
-            float src_rgb = output_image[new_image_pixel_block_coord + threadIdx.x]; // rgb value
-            float dst_rgb = pixel_stacks_as_1d_array[stack_coord+ img_ind*STACK_ITEM_DIM+threadIdx.x]; // rgb value
+            float src_rgb = pixel_stacks_as_1d_array[stack_coord+(img_count-1)*STACK_ITEM_DIM+threadIdx.x]; // rgb value
+            float dst_rgb = pixel_stacks_as_1d_array[stack_coord+img_ind*STACK_ITEM_DIM+threadIdx.x]; // rgb value
 
             // Normal mode
             if (mode==0.0)
@@ -48,14 +49,14 @@ _global_ void blend_pixel_stacks(float* pixel_stacks_as_1d_array, int* image_cou
 
             float out_rgb = (1-dst_alpha/out_alpha)*src_rgb + (dst_alpha/out_alpha)*((1-src_alpha)*dst_rgb + src_alpha*f);
 
-            output_image[new_image_pixel_block_coord+threadIdx.x] = out_rgb;
-            output_image[new_image_pixel_block_coord+3] = out_alpha;
+            pixel_stacks_as_1d_array[stack_coord+(img_count-1)*STACK_ITEM_DIM+threadIdx.x] = out_rgb;
+            pixel_stacks_as_1d_array[stack_coord+(img_count-1)*STACK_ITEM_DIM+3] = out_alpha;
         }
     }
 }
 """)
 
-np.set_printoptions(linewidth=150, precision=4, suppress=True)
+np.set_printoptions(linewidth=120, precision=4, suppress=True)
 
 def normalize_to_float32(array):
 
@@ -69,7 +70,6 @@ def get_rgbazm_and_res(image_data):
 
     # Read the RGBA image
     rgba = cv2.imread(image_data["I"], cv2.IMREAD_UNCHANGED)
-    
     # Saving the image resolution. Notice the order, height comes first!
     image_heigth = rgba.shape[0]
     image_width = rgba.shape[1]
@@ -119,18 +119,15 @@ def generate_pixel_stacks(images_data):
     first_image_width = None
     first_image_heigth = None 
 
-    for image_data in images_data:
-
-        rgbazm, image_width, image_heigth = get_rgbazm_and_res(image_data)
-
+    with futures.ThreadPoolExecutor() as executor:
+        for rgbazm, image_width, image_heigth in executor.map(get_rgbazm_and_res, images_data):
         # Checking the resolution consistance
-        if first_image_heigth is None:
-            first_image_heigth = image_heigth
-            first_image_width = image_width
-        assert first_image_heigth == image_heigth, "Image resolution error!"
-        assert first_image_width == image_width, "Image resolution error!"
-            
-        rgbazm_datas.append(rgbazm)
+            if first_image_heigth is None:
+                first_image_heigth = image_heigth
+                first_image_width = image_width
+            assert first_image_heigth == image_heigth, "Image resolution error!"
+            assert first_image_width == image_width, "Image resolution error!"
+            rgbazm_datas.append(rgbazm)
 
     # Generate the pixel stacks
     pixel_stacks = np.column_stack(rgbazm_datas)
@@ -207,3 +204,70 @@ def compute_pixel_stack(pixel_stacks):
     #         blend_pixels(pixel_info_src, pixel_info_dst, mode)
 
     # pass
+
+# IMAGES_DATA = [
+#    {
+#         "I" : r"e:\Programming\Python\Projects\2017\ZMerger\workspace\simple_test_high_res\04.png", 
+#         "Z" : r"e:\Programming\Python\Projects\2017\ZMerger\workspace\simple_test_high_res\04_z.png", 
+#         "M" : 2.0
+#     },
+#    {
+#         "I" : r"e:\Programming\Python\Projects\2017\ZMerger\workspace\simple_test_high_res\04.png", 
+#         "Z" : r"e:\Programming\Python\Projects\2017\ZMerger\workspace\simple_test_high_res\04_z.png", 
+#         "M" : 2.0
+#     },
+#    {
+#         "I" : r"e:\Programming\Python\Projects\2017\ZMerger\workspace\simple_test_high_res\04.png", 
+#         "Z" : r"e:\Programming\Python\Projects\2017\ZMerger\workspace\simple_test_high_res\04_z.png", 
+#         "M" : 2.0
+#     },
+#     {
+#         "I" : r"e:\Programming\Python\Projects\2017\ZMerger\workspace\simple_test_high_res\03.png", 
+#         "Z" : r"e:\Programming\Python\Projects\2017\ZMerger\workspace\simple_test_high_res\03_z.png", 
+#         "M" : 1.0
+#     },
+#     {
+#         "I" : r"e:\Programming\Python\Projects\2017\ZMerger\workspace\simple_test_high_res\02.png", 
+#         "Z" : r"e:\Programming\Python\Projects\2017\ZMerger\workspace\simple_test_high_res\02_z.png", 
+#         "M" : 0.0
+#     }, 
+#     {
+#         "I" : r"e:\Programming\Python\Projects\2017\ZMerger\workspace\simple_test_high_res\01.png", 
+#         "Z" : r"e:\Programming\Python\Projects\2017\ZMerger\workspace\simple_test_high_res\01_z.png", 
+#         "M" : 0.0
+#     }
+# ]
+
+# t = time()
+# pixel_stacks, image_width, image_heigth = generate_pixel_stacks(IMAGES_DATA)
+# print "generate_pixel_stacks", (time()-t)
+
+# t = time()
+# pixel_stacks = sort_by_z(pixel_stacks)
+# print "sort_by_z", (time()-t)
+
+# USE_CUDA = True
+
+# if not USE_CUDA:
+#     t = time()
+#     compute_pixel_stack(pixel_stacks)
+#     output_image = pixel_stacks[:, 0, :4]
+#     print "blend_pixel_stacks", (time()-t)
+
+# else:
+
+#     t = time()
+
+#     pixel_stacks_as_1d_array = pixel_stacks.reshape(-1)
+
+#     # Is there a way to pass a simple int variable to PyCuda?
+#     img_count = np.array([np.int16(len(IMAGES_DATA))])
+#     blend_pixel_stacks = mod.get_function("blend_pixel_stacks")
+#     blend_pixel_stacks(drv.InOut(pixel_stacks_as_1d_array), drv.In(img_count),
+#                        block=(3,1,1), grid=(image_width,image_heigth))
+#     output_image = pixel_stacks_as_1d_array.reshape(image_heigth, image_width, img_count, 5)[:, :, -1, [0, 1, 2, 3]].reshape(image_heigth, image_width, 4)
+#     print "blend_pixel_stacks_cuda", (time()-t)
+
+# # Reformat for the output
+# output_image = (output_image*255).astype(np.uint8)
+# cv2.imwrite(r"e:\Programming\Python\Projects\2017\ZMerger\workspace\result.png", output_image)
