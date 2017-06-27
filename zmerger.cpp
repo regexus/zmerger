@@ -27,15 +27,16 @@ struct rgbazm
 int main(int argc, char **argv)
 {
 
-    if (argc != 4)
+    if (argc != 5)
     {
-        std::cout << "Use json name path, png output file path and zpass inversion mode as parameter.";
+        std::cout << "Input parameters error! Use json name path, png output file path, zpass inversion mode and zpass extension flag as parameters.";
         return 1;
     }
     
     auto json_file_path = string(argv[1]);
     auto output_png_path = string(argv[2]);
     bool invert_z = stoi(string(argv[3]));
+    bool expand_z = stoi(string(argv[4]));
 
     string json_string;
     string error_message;
@@ -52,7 +53,7 @@ int main(int argc, char **argv)
     if (images_count == 0)
     {
         std::cout << json_string << endl;
-        std::cout << "Error, the program needs at least one input image!" << endl;
+        std::cout << "Warning! No input images found, aborting..." << endl;
         return 1;
     }
 
@@ -65,37 +66,69 @@ int main(int argc, char **argv)
     cv::Mat zpass_image = cv::imread(IMAGES_DATA_INFO[0]["Z"].string_value(), CV_LOAD_IMAGE_UNCHANGED);
 
     // Checking the resolution
-    unsigned short image_heigth = rgba_image.size().height;
-    unsigned short image_width = rgba_image.size().width;
-    assert(image_heigth == zpass_image.heigth());
-    assert(image_width == zpass_image.width());
-
+    const unsigned short image_height = rgba_image.size().height;
+    const unsigned short zpass_height = zpass_image.size().height;
+    const unsigned short image_width = rgba_image.size().width;
+    const unsigned short zpass_width = zpass_image.size().width;
+    
+    if (!(image_height == zpass_height && image_width == zpass_width)) 
+    {
+        cout << "Resolution error! RGBA and Z-DEPTH images have different resolutions." << endl;
+        return 1;
+    }
+        
     // Create the main buffer
-    unsigned short channels_count = rgba_image.channels() + 2; // Adding two for z-depth and mode
-    assert(channels_count == 6);
+    const unsigned short channels_count = rgba_image.channels() + 2; // Adding two for z-depth and mode
+    if (channels_count != 6)
+    {
+       cout << "Channels error! Wrong number of channels, RGBA image should have 6 channels!" << endl;
+       return 1;
+    }
     size_t buffer_size = rgba_image.cols * rgba_image.rows * images_count;
     vector<rgbazm> main_buffer(buffer_size);
 
     // Add the data from images to the buffer
+    bool error_found = false;
     #pragma omp parallel for
     for (short k = 0; k < images_count; ++k)
     {
+        if (error_found) continue;
+
         cv::Mat rgba_image = cv::imread(IMAGES_DATA_INFO[k]["I"].string_value(), CV_LOAD_IMAGE_UNCHANGED);
-        if (rgba_image.depth() != CV_16U) rgba_image.convertTo(rgba_image, CV_16U, 1.0 / 256.0);
+        if (rgba_image.depth() != CV_16U) rgba_image.convertTo(rgba_image, CV_16U, float(UINT16_MAX) / UINT8_MAX);
         auto rgb_data_as_array = reinterpret_cast<uint16_t*>(rgba_image.data);
 
         cv::Mat zpass_image = cv::imread(IMAGES_DATA_INFO[k]["Z"].string_value(), CV_LOAD_IMAGE_UNCHANGED);
         if (zpass_image.channels()>1) cv::cvtColor(zpass_image, zpass_image, CV_BGR2GRAY);
-        if (zpass_image.depth() != CV_16U) zpass_image.convertTo(zpass_image, CV_16U, 1.0 / 256.0);
-        // cv::erode(zpass_image, zpass_image, cv::Mat());
+        if (zpass_image.depth() != CV_16U) zpass_image.convertTo(zpass_image, CV_16U, float(UINT16_MAX) / UINT8_MAX);
+        if (expand_z)
+        {
+            auto el = cv::getStructuringElement(cv::MorphShapes::MORPH_ELLIPSE, cv::Size(3, 3));
+            if (invert_z)
+                cv::erode(zpass_image, zpass_image, el);
+            else
+                cv::dilate(zpass_image, zpass_image, el);
+        }
         auto z_data_as_array = reinterpret_cast<uint16_t*>(zpass_image.data);
         
+        // Checking the resolution
+        if (!
+            ((image_height == rgba_image.size().height) &&
+            (image_height == zpass_image.size().height) &&
+            (image_width == rgba_image.size().width) &&
+            (image_width == zpass_image.size().width))
+            )
+        {
+            error_found = true;
+            continue;
+        }
+
         unsigned char mode = stoi(IMAGES_DATA_INFO[k]["M"].string_value());
 
         unsigned short i, j;
         size_t rgba_index, zpass_index, block_index;
 
-        for (i = 0; i < image_heigth; ++i)
+        for (i = 0; i < image_height; ++i)
             for (j = 0; j < image_width; ++j)
             {
                 // Compute indexies
@@ -113,6 +146,12 @@ int main(int argc, char **argv)
                 main_buffer[block_index].m = mode;
             }
     }
+    
+    if (error_found)
+    {
+        cout << "Resolution error! All images should have the same resolution. Aborting..." << endl;
+        return 1;
+    }
 
     // Print timing
     auto duration = duration_cast<milliseconds>(high_resolution_clock::now() - t1).count() / 1000.0;
@@ -121,9 +160,9 @@ int main(int argc, char **argv)
 
     // Generate sorting map
     vector<vector<vector<unsigned char>>> sorting_map;
-    sorting_map.resize(image_heigth);
+    sorting_map.resize(image_height);
     #pragma omp parallel for
-    for (short i = 0; i < image_heigth; ++i)
+    for (short i = 0; i < image_height; ++i)
     {
         size_t block_index;
         sorting_map[i].resize(image_width);
@@ -156,10 +195,10 @@ int main(int argc, char **argv)
     t1 = high_resolution_clock::now();
     std::cout << "Sorting map generated! Elapsed time: " << duration << endl;
 
-    vector<uint16_t> output_buffer(image_heigth*image_width * 4, 0);
+    vector<uint16_t> output_buffer(image_height*image_width * 4, 0);
     // Apply pixel blending
     #pragma omp parallel for
-    for (short i = 0; i < image_heigth; ++i)
+    for (short i = 0; i < image_height; ++i)
     {
         size_t sorted_image_index, block_index, output_index;
         float src_alpha, dst_alpha, out_alpha;
@@ -226,7 +265,7 @@ int main(int argc, char **argv)
 
     // Save the output image
     auto output_image = cv::Mat(output_buffer, false);
-    output_image = output_image.reshape(4, image_heigth);
+    output_image = output_image.reshape(4, image_height);
     cv::imwrite(output_png_path, output_image);
 
     // Print timing
