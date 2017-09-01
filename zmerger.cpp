@@ -1,6 +1,6 @@
 // Name :: Z-based pixel blender 
 // Author :: Alexander Kasperovich
-// Date :: Juni 2017
+// Date :: September 2017
 
 #include <map>
 #include <omp.h>
@@ -27,27 +27,36 @@ struct rgbazm
 int main(int argc, char **argv)
 {
 
-    if (argc != 5)
+    if (argc < 5)
     {
         std::cout << "Input parameters error! Use json name path, png output file path, zpass inversion mode and zpass extension flag as parameters.";
         return 1;
     }
-    
+
     auto json_file_path = string(argv[1]);
     auto output_png_path = string(argv[2]);
     bool invert_z = stoi(string(argv[3]));
     bool expand_z = stoi(string(argv[4]));
+    
+    // Get the output resolution (optional)
+    int out_res_x = 0;
+    int out_res_y = 0;
+    if (argc == 7) 
+    {
+        out_res_x = stoi(string(argv[5]));
+        out_res_y = stoi(string(argv[6]));
+    }
 
     string json_string;
     string error_message;
-    
+
     // Get the data from json file
     ifstream json_file(json_file_path);
 
     string tmp_str;
     while (std::getline(json_file, tmp_str))
         json_string += tmp_str;
-    
+
     auto IMAGES_DATA_INFO = json11::Json::parse(json_string, error_message);
     unsigned char images_count = IMAGES_DATA_INFO.array_items().size();
     if (images_count == 0)
@@ -70,19 +79,19 @@ int main(int argc, char **argv)
     const unsigned short zpass_height = zpass_image.size().height;
     const unsigned short image_width = rgba_image.size().width;
     const unsigned short zpass_width = zpass_image.size().width;
-    
-    if (!(image_height == zpass_height && image_width == zpass_width)) 
+
+    if (!(image_height == zpass_height && image_width == zpass_width))
     {
         cout << "Resolution error! RGBA and Z-DEPTH images have different resolutions." << endl;
         return 1;
     }
-        
+
     // Create the main buffer
     const unsigned short channels_count = rgba_image.channels() + 2; // Adding two for z-depth and mode
     if (channels_count != 6)
     {
-       cout << "Channels error! Wrong number of channels, RGBA image should have 6 channels!" << endl;
-       return 1;
+        cout << "Channels error! Wrong number of channels, RGBA image should have 6 channels!" << endl;
+        return 1;
     }
     size_t buffer_size = rgba_image.cols * rgba_image.rows * images_count;
     vector<rgbazm> main_buffer(buffer_size);
@@ -103,14 +112,14 @@ int main(int argc, char **argv)
         if (zpass_image.depth() != CV_16U) zpass_image.convertTo(zpass_image, CV_16U, float(UINT16_MAX) / UINT8_MAX);
         if (expand_z)
         {
-            auto el = cv::getStructuringElement(cv::MorphShapes::MORPH_ELLIPSE, cv::Size(3, 3));
+            auto el = cv::getStructuringElement(cv::MorphShapes::MORPH_ELLIPSE, cv::Size(2, 2));
             if (invert_z)
                 cv::erode(zpass_image, zpass_image, el);
             else
                 cv::dilate(zpass_image, zpass_image, el);
         }
         auto z_data_as_array = reinterpret_cast<uint16_t*>(zpass_image.data);
-        
+
         // Checking the resolution
         if (!
             ((image_height == rgba_image.size().height) &&
@@ -146,7 +155,7 @@ int main(int argc, char **argv)
                 main_buffer[block_index].m = mode;
             }
     }
-    
+
     if (error_found)
     {
         cout << "Resolution error! All images should have the same resolution. Aborting..." << endl;
@@ -184,9 +193,9 @@ int main(int argc, char **argv)
 
             auto& sorted_indexies = sorting_map[i][j];
             if (invert_z)
-                sort(sorted_indexies.begin(), sorted_indexies.end(), [&zvalues] (unsigned char i1, unsigned char i2) { return zvalues[i1] > zvalues[i2]; });
+                stable_sort(sorted_indexies.begin(), sorted_indexies.end(), [&zvalues] (unsigned char i1, unsigned char i2) { return zvalues[i1] > zvalues[i2]; });
             else
-                sort(sorted_indexies.begin(), sorted_indexies.end(), [&zvalues] (unsigned char i1, unsigned char i2) { return zvalues[i1] < zvalues[i2]; });
+                stable_sort(sorted_indexies.begin(), sorted_indexies.end(), [&zvalues] (unsigned char i1, unsigned char i2) { return zvalues[i1] < zvalues[i2]; });
         }
     }
 
@@ -211,16 +220,16 @@ int main(int argc, char **argv)
         for (j = 0; j < image_width; ++j)
             for (k = 0; k < images_count; ++k)
             {
-                sorted_image_index = sorting_map[i][j][k]; 
+                sorted_image_index = sorting_map[i][j][k];
                 block_index = (i*image_width + j)*images_count + sorted_image_index;
                 output_index = (i*image_width + j) * 4;
 
                 src_alpha = output_buffer[output_index + 3] / (UINT16_MAX + 0.0f); // alpha value
                 dst_alpha = main_buffer[block_index].a / (UINT16_MAX + 0.0f); // alpha value
-                // Early termination in case of black alpha
+                                                                              // Early termination in case of black alpha
                 if (dst_alpha == 0) continue;
                 out_alpha = dst_alpha + src_alpha*(1 - dst_alpha);
-               
+
                 mode = main_buffer[block_index].m; // mode value
                 if (k == 0) mode = 0; // Reset to normal for the first image
 
@@ -236,7 +245,7 @@ int main(int argc, char **argv)
                     else if (channel == 2)
                         dst_rgb = main_buffer[block_index].r / (UINT16_MAX + 0.0f); // rgb value
 
-                    // Normal mode
+                                                                                    // Normal mode
                     if (mode == 0)
                         blending_function = dst_rgb;
 
@@ -263,9 +272,18 @@ int main(int argc, char **argv)
     t1 = high_resolution_clock::now();
     std::cout << "Pixel blending done! Elapsed time: " << duration << endl;
 
-    // Save the output image
+    // Create output image buffer
     auto output_image = cv::Mat(output_buffer, false);
     output_image = output_image.reshape(4, image_height);
+
+    // Rescale output image if neccessary
+    if (bool(out_res_x * out_res_y)) 
+    {
+        cv::Size size(out_res_x, out_res_y);
+        cv::resize(output_image, output_image, size, 0, 0, cv::INTER_CUBIC);
+    }
+
+    // Save the output image
     cv::imwrite(output_png_path, output_image);
 
     // Print timing
