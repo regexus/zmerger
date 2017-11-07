@@ -1,6 +1,6 @@
-// Name :: Z-based pixel blender 
+// Name :: Z-based pixel merger 
 // Author :: Alexander Kasperovich
-// Date :: September 2017
+// Date :: November 2017
 
 #include <map>
 #include <omp.h>
@@ -55,7 +55,10 @@ int main(int argc, char **argv)
 
     string tmp_str;
     while (std::getline(json_file, tmp_str))
-        json_string += tmp_str;
+        if (tmp_str.substr(0, 2) != "//") 
+        {
+            json_string += tmp_str;
+        }
 
     auto IMAGES_DATA_INFO = json11::Json::parse(json_string, error_message);
     unsigned char images_count = IMAGES_DATA_INFO.array_items().size();
