@@ -1,21 +1,20 @@
-// Name :: Z-based pixel merger 
+// Name   :: Z-based pixel blender 
+// Date   :: Februar 2018
 // Author :: Alexander Kasperovich
-// Date :: November 2017
 
 #include <map>
-#include <omp.h>
 #include <vector>
 #include <chrono>
 #include <fstream>
 #include <numeric>
 #include <iostream>
+#include <algorithm> 
+#include <omp.h>
+
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include "json11.hpp"
-
-using namespace std;
-using namespace std::chrono;
 
 struct rgbazm
 {
@@ -23,6 +22,18 @@ struct rgbazm
     uint16_t z;
     unsigned char m;
 };
+
+
+auto lstrip(std::string s) -> std::string {
+
+	s.erase(
+		s.begin(), 
+		std::find_if(s.begin(), s.end(), [](int ch) {return !std::isspace(ch);})
+	);
+
+	return s;
+
+}
 
 int main(int argc, char **argv)
 {
@@ -33,59 +44,63 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    auto json_file_path = string(argv[1]);
-    auto output_png_path = string(argv[2]);
-    bool invert_z = stoi(string(argv[3]));
-    bool expand_z = stoi(string(argv[4]));
+    auto json_file_path = std::string(argv[1]);
+    auto output_png_path = std::string(argv[2]);
+    bool invert_z = std::stoi(std::string(argv[3]));
+    bool expand_z = std::stoi(std::string(argv[4]));
     
     // Get the output resolution (optional)
     int out_res_x = 0;
     int out_res_y = 0;
     if (argc == 7) 
     {
-        out_res_x = stoi(string(argv[5]));
-        out_res_y = stoi(string(argv[6]));
+        out_res_x = std::stoi(std::string(argv[5]));
+        out_res_y = std::stoi(std::string(argv[6]));
     }
 
-    string json_string;
-    string error_message;
+	std::string json_string;
+	std::string error_message;
 
     // Get the data from json file
-    ifstream json_file(json_file_path);
+	std::ifstream json_file(json_file_path);
 
-    string tmp_str;
+	std::string tmp_str;
     while (std::getline(json_file, tmp_str))
-        if (tmp_str.substr(0, 2) != "//") 
+        if (lstrip(tmp_str).substr(0, 2) != "//") 
         {
             json_string += tmp_str;
         }
 
     auto IMAGES_DATA_INFO = json11::Json::parse(json_string, error_message);
-    unsigned char images_count = IMAGES_DATA_INFO.array_items().size();
+    auto images_count = IMAGES_DATA_INFO.array_items().size();
     if (images_count == 0)
     {
-        std::cout << json_string << endl;
-        std::cout << "Warning! No input images found, aborting..." << endl;
+        std::cout << json_string << std::endl;
+        std::cout << "Warning! No input images found, aborting..." << std::endl;
         return 1;
     }
 
-    // Starting time tracking
-    auto t1 = high_resolution_clock::now();
-    auto t2 = high_resolution_clock::now();
+    // Starting global time tracking
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+	// Starting time tracking for images reading process
+	auto t1 = std::chrono::high_resolution_clock::now();
 
     // Reading the first image to get the resolution
     cv::Mat rgba_image = cv::imread(IMAGES_DATA_INFO[0]["I"].string_value(), CV_LOAD_IMAGE_UNCHANGED);
     cv::Mat zpass_image = cv::imread(IMAGES_DATA_INFO[0]["Z"].string_value(), CV_LOAD_IMAGE_UNCHANGED);
 
-    // Checking the resolution
-    const unsigned short image_height = rgba_image.size().height;
-    const unsigned short zpass_height = zpass_image.size().height;
-    const unsigned short image_width = rgba_image.size().width;
-    const unsigned short zpass_width = zpass_image.size().width;
+	// Collect dimensions info
+	auto image_height = rgba_image.size().height;
+    auto zpass_height = zpass_image.size().height;
+    auto image_width = rgba_image.size().width;
+    auto zpass_width = zpass_image.size().width;
+	auto pixels_count = image_height*image_width;
 
+	// Checking the resolution
     if (!(image_height == zpass_height && image_width == zpass_width))
     {
-        cout << "Resolution error! RGBA and Z-DEPTH images have different resolutions." << endl;
+		std::cout << "Resolution error! RGBA and Z-DEPTH images have different resolutions." << std::endl;
         return 1;
     }
 
@@ -93,33 +108,32 @@ int main(int argc, char **argv)
     const unsigned short channels_count = rgba_image.channels() + 2; // Adding two for z-depth and mode
     if (channels_count != 6)
     {
-        cout << "Channels error! Wrong number of channels, RGBA image should have 6 channels!" << endl;
+		std::cout << "Channels error! Wrong number of channels, RGBA image should have 6 channels!" << std::endl;
         return 1;
     }
     size_t buffer_size = rgba_image.cols * rgba_image.rows * images_count;
-    vector<rgbazm> main_buffer(buffer_size);
+    std::vector<rgbazm> main_buffer;
+    main_buffer.reserve(buffer_size);
 
-    // Add the data from images to the buffer
+    // Add the data from images to the main buffer
     bool error_found = false;
+    auto ellipse_kernel = cv::getStructuringElement(cv::MorphShapes::MORPH_ELLIPSE, cv::Size(2, 2));
     #pragma omp parallel for
     for (short k = 0; k < images_count; ++k)
     {
-        if (error_found) continue;
 
         cv::Mat rgba_image = cv::imread(IMAGES_DATA_INFO[k]["I"].string_value(), CV_LOAD_IMAGE_UNCHANGED);
         if (rgba_image.depth() != CV_16U) rgba_image.convertTo(rgba_image, CV_16U, float(UINT16_MAX) / UINT8_MAX);
         auto rgb_data_as_array = reinterpret_cast<uint16_t*>(rgba_image.data);
 
-        cv::Mat zpass_image = cv::imread(IMAGES_DATA_INFO[k]["Z"].string_value(), CV_LOAD_IMAGE_UNCHANGED);
-        if (zpass_image.channels()>1) cv::cvtColor(zpass_image, zpass_image, CV_BGR2GRAY);
+        cv::Mat zpass_image = cv::imread(IMAGES_DATA_INFO[k]["Z"].string_value(), CV_LOAD_IMAGE_ANYDEPTH || CV_LOAD_IMAGE_GRAYSCALE);
         if (zpass_image.depth() != CV_16U) zpass_image.convertTo(zpass_image, CV_16U, float(UINT16_MAX) / UINT8_MAX);
         if (expand_z)
         {
-            auto el = cv::getStructuringElement(cv::MorphShapes::MORPH_ELLIPSE, cv::Size(2, 2));
             if (invert_z)
-                cv::erode(zpass_image, zpass_image, el);
+                cv::erode(zpass_image, zpass_image, ellipse_kernel);
             else
-                cv::dilate(zpass_image, zpass_image, el);
+                cv::dilate(zpass_image, zpass_image, ellipse_kernel);
         }
         auto z_data_as_array = reinterpret_cast<uint16_t*>(zpass_image.data);
 
@@ -132,21 +146,23 @@ int main(int argc, char **argv)
             )
         {
             error_found = true;
-            continue;
+            break;
         }
 
         unsigned char mode = stoi(IMAGES_DATA_INFO[k]["M"].string_value());
 
         unsigned short i, j;
         size_t rgba_index, zpass_index, block_index;
+		auto channels_count = rgba_image.channels();
 
         for (i = 0; i < image_height; ++i)
             for (j = 0; j < image_width; ++j)
             {
                 // Compute indexies
-                rgba_index = (i*image_width + j)*rgba_image.channels();
-                zpass_index = (i*image_width + j);
-                block_index = (i*image_width + j)*images_count + k;
+				zpass_index = i*image_width + j;
+                rgba_index = zpass_index*channels_count;
+				block_index = pixels_count*k + zpass_index;
+				//block_index = zpass_index*images_count + k;
                 // RGBA Values
                 main_buffer[block_index].b = rgb_data_as_array[rgba_index + 0];
                 main_buffer[block_index].g = rgb_data_as_array[rgba_index + 1];
@@ -161,17 +177,17 @@ int main(int argc, char **argv)
 
     if (error_found)
     {
-        cout << "Resolution error! All images should have the same resolution. Aborting..." << endl;
+        std::cout << "Resolution error! All images should have the same resolution. Aborting..." << std::endl;
         return 1;
     }
 
     // Print timing
-    auto duration = duration_cast<milliseconds>(high_resolution_clock::now() - t1).count() / 1000.0;
-    t1 = high_resolution_clock::now();
-    std::cout << "Images are loaded! Elapsed time: " << duration << endl;
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
+    t1 = std::chrono::high_resolution_clock::now();
+    std::cout << "Images are loaded! Elapsed time: " << duration << std::endl;
 
     // Generate sorting map
-    vector<vector<vector<unsigned char>>> sorting_map;
+    std::vector<std::vector<std::vector<unsigned char>>> sorting_map;
     sorting_map.resize(image_height);
     #pragma omp parallel for
     for (short i = 0; i < image_height; ++i)
@@ -184,10 +200,10 @@ int main(int argc, char **argv)
             sorting_map[i][j].resize(images_count);
 
             // Get z-values of the stack
-            vector<uint16_t> zvalues(images_count);
+            std::vector<uint16_t> zvalues(images_count);
             for (unsigned char k = 0; k < images_count; ++k)
             {
-                block_index = (i*image_width + j)*images_count + k;
+                block_index = pixels_count*k + (i*image_width + j);
                 // Fill map with initial indexes
                 sorting_map[i][j][k] = k;
                 // Collect the z-values
@@ -196,23 +212,23 @@ int main(int argc, char **argv)
 
             auto& sorted_indexies = sorting_map[i][j];
             if (invert_z)
-                stable_sort(sorted_indexies.begin(), sorted_indexies.end(), [&zvalues] (unsigned char i1, unsigned char i2) { return zvalues[i1] > zvalues[i2]; });
+                stable_sort(sorted_indexies.begin(), sorted_indexies.end(), [&zvalues] (const unsigned char &i1, const unsigned char &i2) { return zvalues[i1] > zvalues[i2]; });
             else
-                stable_sort(sorted_indexies.begin(), sorted_indexies.end(), [&zvalues] (unsigned char i1, unsigned char i2) { return zvalues[i1] < zvalues[i2]; });
+                stable_sort(sorted_indexies.begin(), sorted_indexies.end(), [&zvalues] (const unsigned char &i1, const unsigned char &i2) { return zvalues[i1] < zvalues[i2]; });
         }
     }
 
     // Print timing
-    duration = duration_cast<milliseconds>(high_resolution_clock::now() - t1).count() / 1000.0;
-    t1 = high_resolution_clock::now();
-    std::cout << "Sorting map generated! Elapsed time: " << duration << endl;
+	duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
+	t1 = std::chrono::high_resolution_clock::now();
+    std::cout << "Sorting map generated! Elapsed time: " << duration << std::endl;
 
-    vector<uint16_t> output_buffer(image_height*image_width * 4, 0);
+    std::vector<uint16_t> output_buffer(image_height*image_width * 4, 0);
     // Apply pixel blending
     #pragma omp parallel for
     for (short i = 0; i < image_height; ++i)
     {
-        size_t sorted_image_index, block_index, output_index;
+        size_t pixel_index, block_index, output_index;
         float src_alpha, dst_alpha, out_alpha;
         float src_rgb, dst_rgb, out_rgb;
         float blending_function;
@@ -220,60 +236,65 @@ int main(int argc, char **argv)
         unsigned short j;
         unsigned char k;
 
-        for (j = 0; j < image_width; ++j)
-            for (k = 0; k < images_count; ++k)
-            {
-                sorted_image_index = sorting_map[i][j][k];
-                block_index = (i*image_width + j)*images_count + sorted_image_index;
-                output_index = (i*image_width + j) * 4;
+		for (j = 0; j < image_width; ++j) 
+		{
+			for (k = 0; k < images_count; ++k)
+			{
+				pixel_index = i*image_width + j;
+				//block_index = pixel_index*images_count + sorting_map[i][j][k]; // sorting_map[i][j][k] is the index of the sorted image
+				block_index = pixels_count*sorting_map[i][j][k] + pixel_index;
 
-                src_alpha = output_buffer[output_index + 3] / (UINT16_MAX + 0.0f); // alpha value
-                dst_alpha = main_buffer[block_index].a / (UINT16_MAX + 0.0f); // alpha value
-                                                                              // Early termination in case of black alpha
-                if (dst_alpha == 0) continue;
-                out_alpha = dst_alpha + src_alpha*(1 - dst_alpha);
+				output_index = pixel_index * 4;
 
-                mode = main_buffer[block_index].m; // mode value
-                if (k == 0) mode = 0; // Reset to normal for the first image
+				src_alpha = output_buffer[output_index + 3] / (UINT16_MAX + 0.0f); // alpha value
+				dst_alpha = main_buffer[block_index].a / (UINT16_MAX + 0.0f); // alpha value
+																			  
+				if (dst_alpha == 0) continue; // Early termination in case of black alpha
 
-                for (unsigned char channel = 0; channel < 3; ++channel)
-                {
-                    src_rgb = output_buffer[output_index + channel] / (UINT16_MAX + 0.0f); // rgb value
-                    if (channel == 0)
-                        dst_rgb = main_buffer[block_index].b / (UINT16_MAX + 0.0f); // rgb value
+				out_alpha = dst_alpha + src_alpha*(1 - dst_alpha);
 
-                    else if (channel == 1)
-                        dst_rgb = main_buffer[block_index].g / (UINT16_MAX + 0.0f); // rgb value
+				mode = main_buffer[block_index].m; // mode value
+				if (k == 0) mode = 0; // Reset to normal for the first image
 
-                    else if (channel == 2)
-                        dst_rgb = main_buffer[block_index].r / (UINT16_MAX + 0.0f); // rgb value
+				for (unsigned char channel = 0; channel < 3; ++channel)
+				{
+					src_rgb = output_buffer[output_index + channel] / (UINT16_MAX + 0.0f); // rgb value
+					if (channel == 0)
+						dst_rgb = main_buffer[block_index].b / (UINT16_MAX + 0.0f); // rgb value
 
-                                                                                    // Normal mode
-                    if (mode == 0)
-                        blending_function = dst_rgb;
+					else if (channel == 1)
+						dst_rgb = main_buffer[block_index].g / (UINT16_MAX + 0.0f); // rgb value
 
-                    // Multiply mode
-                    if (mode == 1)
-                        blending_function = src_rgb * dst_rgb;
+					else if (channel == 2)
+						dst_rgb = main_buffer[block_index].r / (UINT16_MAX + 0.0f); // rgb value
 
-                    // Screen mode
-                    if (mode == 2)
-                        blending_function = src_rgb + dst_rgb - src_rgb * dst_rgb;
+																					// Normal mode
+					if (mode == 0)
+						blending_function = dst_rgb;
 
-                    out_rgb = (1 - dst_alpha / out_alpha)*src_rgb + (dst_alpha / out_alpha)*((1 - src_alpha)*dst_rgb + src_alpha*blending_function);
+					// Multiply mode
+					if (mode == 1)
+						blending_function = src_rgb * dst_rgb;
 
-                    output_buffer[output_index + channel] = (uint16_t)(out_rgb*UINT16_MAX);
-                }
+					// Screen mode
+					if (mode == 2)
+						blending_function = src_rgb + dst_rgb - src_rgb * dst_rgb;
 
-                output_buffer[output_index + 3] = (uint16_t)(out_alpha*UINT16_MAX);
+					out_rgb = (1 - dst_alpha / out_alpha)*src_rgb + (dst_alpha / out_alpha)*((1 - src_alpha)*dst_rgb + src_alpha*blending_function);
 
-            }
+					output_buffer[output_index + channel] = (uint16_t)(out_rgb*UINT16_MAX);
+				}
+
+				output_buffer[output_index + 3] = (uint16_t)(out_alpha*UINT16_MAX);
+			}
+		}
+
     }
 
     // Print timing
-    duration = duration_cast<milliseconds>(high_resolution_clock::now() - t1).count() / 1000.0;
-    t1 = high_resolution_clock::now();
-    std::cout << "Pixel blending done! Elapsed time: " << duration << endl;
+	duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
+	t1 = std::chrono::high_resolution_clock::now();
+	std::cout << "Pixel blending done! Elapsed time: " << duration << std::endl;
 
     // Create output image buffer
     auto output_image = cv::Mat(output_buffer, false);
@@ -290,16 +311,12 @@ int main(int argc, char **argv)
     cv::imwrite(output_png_path, output_image);
 
     // Print timing
-    duration = duration_cast<milliseconds>(high_resolution_clock::now() - t1).count() / 1000.0;
-    std::cout << "Image saved! Elapsed time: " << duration << endl;
+	duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
+    std::cout << "Image saved! Elapsed time: " << duration << std::endl;
 
-    // Print timing
-    duration = duration_cast<milliseconds>(high_resolution_clock::now() - t2).count() / 1000.0;
-    std::cout << "Processing done! Commulative elapsed time: " << duration << endl;
-
-    //cv::namedWindow("Display window", cv::WINDOW_NORMAL);// Create a window for display.
-    //cv::imshow("Display window", output_image);                   // Show our image inside it.
-    //cv::waitKey(0);                                          // Wait for a keystroke in the window
+    // Print global timing
+	duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count() / 1000.0;
+	std::cout << "Processing done! Commulative elapsed time: " << duration << std::endl;
 
     return 0;
 }
