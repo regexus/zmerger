@@ -117,7 +117,7 @@ int main(int argc, char **argv)
 	// Add the data from images to the main buffer
 	bool error_found = false;
 	auto ellipse_kernel = cv::getStructuringElement(cv::MorphShapes::MORPH_ELLIPSE, cv::Size(2, 2));
-#pragma omp parallel for
+	#pragma omp parallel for
 	for (short k = 0; k < images_count; ++k)
 	{
 
@@ -141,8 +141,8 @@ int main(int argc, char **argv)
 		if (!
 			((image_height == rgba_image.size().height) &&
 			(image_height == zpass_image.size().height) &&
-				(image_width == rgba_image.size().width) &&
-				(image_width == zpass_image.size().width))
+			(image_width == rgba_image.size().width) &&
+			(image_width == zpass_image.size().width))
 			)
 		{
 			error_found = true;
@@ -189,7 +189,7 @@ int main(int argc, char **argv)
 	// Generate sorting map
 	std::vector<std::vector<std::vector<unsigned char>>> sorting_map;
 	sorting_map.resize(image_height);
-#pragma omp parallel for
+	#pragma omp parallel for
 	for (short i = 0; i < image_height; ++i)
 	{
 		size_t block_index;
@@ -226,7 +226,7 @@ int main(int argc, char **argv)
 
 	std::vector<uint16_t> output_buffer(image_height*image_width * 4, 0);
 	// Apply pixel blending
-#pragma omp parallel for
+	#pragma omp parallel for
 	for (short i = 0; i < image_height; ++i)
 	{
 		size_t pixel_index, block_index, output_index;
