@@ -38,32 +38,28 @@ blend_value(float a_value, float b_value, BlendMode mode)
 }
 
 void
-blend_pixel(uint16_t a_r, uint16_t a_g, uint16_t a_b, uint16_t a_a, 
+blend_pixel(float a_r, float a_g, float a_b, float a_a, 
             uint16_t b_r, uint16_t b_g, uint16_t b_b, uint16_t b_a, 
-            BlendMode mode, cv::Vec<uint16_t, 4> & result)
+            BlendMode mode, cv::Vec<float, 4> & result)
 {   
     // Early termination in case of black alpha
     if (b_a == 0)
     {
         result = {a_r, a_g, a_b, a_a};
-        return; 
+        return;
     }
 
-    float a_r_ = static_cast<float>(a_r)/MAX_16_BIT_VALUE;
-    float a_g_ = static_cast<float>(a_g)/MAX_16_BIT_VALUE;
-    float a_b_ = static_cast<float>(a_b)/MAX_16_BIT_VALUE;
-    float a_a_ = static_cast<float>(a_a)/MAX_16_BIT_VALUE;
-    float b_r_ = static_cast<float>(b_r)/MAX_16_BIT_VALUE;
-    float b_g_ = static_cast<float>(b_g)/MAX_16_BIT_VALUE;
-    float b_b_ = static_cast<float>(b_b)/MAX_16_BIT_VALUE;
-    float b_a_ = static_cast<float>(b_a)/MAX_16_BIT_VALUE;
+    float b_r_ = b_r/MAX_16_BIT_VALUE_F;
+    float b_g_ = b_g/MAX_16_BIT_VALUE_F;
+    float b_b_ = b_b/MAX_16_BIT_VALUE_F;
+    float b_a_ = b_a/MAX_16_BIT_VALUE_F;
 
-    float out_alpha = blend_apha(a_a_, b_a_);
+    float out_alpha = blend_apha(a_a, b_a_);
 
-    result[0] = ((1-b_a_/out_alpha)*a_r_ + (b_a_/out_alpha)*((1-a_a_)*b_r_ + a_a_*blend_value(a_r_, b_r_, mode)))*MAX_16_BIT_VALUE;
-    result[1] = ((1-b_a_/out_alpha)*a_g_ + (b_a_/out_alpha)*((1-a_a_)*b_g_ + a_a_*blend_value(a_g_, b_g_, mode)))*MAX_16_BIT_VALUE;
-    result[2] = ((1-b_a_/out_alpha)*a_b_ + (b_a_/out_alpha)*((1-a_a_)*b_b_ + a_a_*blend_value(a_b_, b_b_, mode)))*MAX_16_BIT_VALUE;
-    result[3] = out_alpha*MAX_16_BIT_VALUE;
+    result[0] = (1-b_a_/out_alpha)*a_r + (b_a_/out_alpha)*((1-a_a)*b_r_ + a_a*blend_value(a_r, b_r_, mode));
+    result[1] = (1-b_a_/out_alpha)*a_g + (b_a_/out_alpha)*((1-a_a)*b_g_ + a_a*blend_value(a_g, b_g_, mode));
+    result[2] = (1-b_a_/out_alpha)*a_b + (b_a_/out_alpha)*((1-a_a)*b_b_ + a_a*blend_value(a_b, b_b_, mode));
+    result[3] = out_alpha;
 }
 
 // ZImage
@@ -152,11 +148,11 @@ ZImageSet::ZImageSet()
 }
 
 cv::Mat_<cv::Vec<uint16_t, 4>>
-ZImageSet::merge_images(bool invert_z, cv::Vec<uint16_t, 4> background={0, 0, 0, MAX_16_BIT_VALUE})
+ZImageSet::merge_images(bool invert_z, cv::Vec<float, 4> background={0, 0, 0, 1})
 {
     int height = z_images[0].height;
     int width = z_images[0].width;
-    cv::Mat_<cv::Vec<uint16_t, 4>> result(height, width, background);
+    cv::Mat_<cv::Vec<float, 4>> result(height, width, background);
 
     #pragma omp parallel for
     for (int i = 0; i<height; ++i)
@@ -191,6 +187,6 @@ ZImageSet::merge_images(bool invert_z, cv::Vec<uint16_t, 4> background={0, 0, 0,
         }
     }
 
-    return result;
+    return cv::Mat_<cv::Vec<uint16_t, 4>>(result*MAX_16_BIT_VALUE);
 }
 

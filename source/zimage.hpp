@@ -39,5 +39,5 @@ class ZImageSet
     ZImageSet();
     
     cv::Mat_<cv::Vec<uint16_t, 4>>
-    merge_images(bool invert_z, cv::Vec<uint16_t, 4> background);
+    merge_images(bool invert_z, cv::Vec<float, 4> background);
 };
