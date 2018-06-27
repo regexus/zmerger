@@ -2,7 +2,6 @@
 // // Date   :: Februar 2018
 // // Author :: Alexander Kasperovich
 
-#include "image_reader.hpp"
 #include "utilities.hpp"
 #include "zimage.hpp"
 #include "json11.hpp"
@@ -33,128 +32,6 @@ struct rgbazm
     uint16_t z;
     unsigned char m;
 };
-
-
-auto z_sorter = [](rgbazm_ a, rgbazm_ b) {
-    return (a)[4] < (b)[4];
-};
-
-auto z_sorter_inv = [](rgbazm_ a, rgbazm_ b) {
-    return (a)[4] > (b)[4];
-};
-
-void
-blend_pixels(rgbazm_& a, rgbazm_& b, rgbazm_& result)
-{   
-
-    auto& dst_alpha = b[3]; // alpha value
-
-    // Early termination in case of black alpha
-    if (dst_alpha == 0)
-    {
-        result = a;
-        result[5] = static_cast<float>(BlendMode::NORMAL);
-        return;
-    }
-    // Early termination in case of white alpha
-    else if (dst_alpha == 1)
-    {   
-        result = b;
-        result[5] = static_cast<float>(BlendMode::NORMAL);
-        return;
-    }
-
-    auto& src_alpha = a[3]; // alpha value
-    auto out_alpha = dst_alpha + src_alpha*(1 - dst_alpha);
-
-    float src_value; // r/g/b value
-    float dst_value; // r/g/b value
-
-    float blending_function_result;
-    auto mode = static_cast<BlendMode>(static_cast<int>(b[5])); // mode value
-
-    for (unsigned char channel = 0; channel < 3; ++channel)
-    {
-
-        src_value = a[channel]; // r/g/b value
-        dst_value = b[channel]; // r/g/b value
-
-        // Normal mode
-        if (mode == BlendMode::NORMAL)
-        {
-            blending_function_result = dst_value;
-        }
-
-        // Multiply mode
-        else if (mode == BlendMode::MULTIPLY)
-        {
-            blending_function_result = src_value * dst_value;
-        }
-
-        // Screen mode
-        else if (mode == BlendMode::SCREEN)
-        {
-            blending_function_result = src_value + dst_value - src_value * dst_value;
-        }
-
-        result[channel] = (1 - dst_alpha / out_alpha)*src_value + (dst_alpha / out_alpha)*((1 - src_alpha)*dst_value + src_alpha*blending_function_result);
-    }
-
-    result[3] = out_alpha;
-    result[4] = b[4]; // Z-Depth
-    result[5] = static_cast<float>(BlendMode::NORMAL);
-}
-
-rgbazm_
-blend_pixel_stack(std::vector<rgbazm_>& pixel_stack, rgbazm_ background_pixel, std::function<bool(rgbazm_, rgbazm_)> sorter)
-{
-
-    rgbazm_ result = background_pixel;
-
-    std::stable_sort(pixel_stack.begin(), pixel_stack.end(), sorter);
-
-    for (auto pixel : pixel_stack)
-    {
-        blend_pixels(result, pixel, result);
-    }
-
-    return result;
-}
-
-ZMergerImage
-blend_images(std::vector<ZMergerImage> images, rgbazm_ background_pixel, bool invert_z)
-{
-    auto rows = images[0].data.rows;
-    auto cols = images[0].data.cols;
-    ZMergerImage result(rows, cols);
-
-    std::function<bool(rgbazm_, rgbazm_)> sorter;
-
-    if (invert_z)
-        sorter = z_sorter_inv;
-    else
-        sorter = z_sorter;
-
-    #pragma omp parallel for
-    for (int i = 0; i < rows; ++i)
-    {
-        std::vector<rgbazm_> pixel_stack(images.size());
-        for (int j = 0; j < cols; ++j)
-        {
-            for (int k = 0; k < images.size(); ++k)
-            {
-                pixel_stack[k] = images[k].data(i, j);
-            }
-            result.data(i, j) = blend_pixel_stack(
-                pixel_stack, background_pixel, sorter
-            );
-        }
-    }
-
-    return result;
-
-}
-
 
 int main(int argc, char** argv)
 {
@@ -200,10 +77,10 @@ int main(int argc, char** argv)
     }
 
     // Starting global time tracking
-    auto start_time = std::chrono::high_resolution_clock::now();
+    auto start_time = get_time();
 
     // Starting time tracking for images reading process
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = get_time();
 
     ZImageSet zimage_set;
     zimage_set.z_images.reserve(images_count);
@@ -220,15 +97,15 @@ int main(int argc, char** argv)
     }
 
     // Print timing
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
-    t1 = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - t1).count() / 1000.0;
     std::cout << "Images are loaded! Elapsed time: " << duration << std::endl;
+    t1 = get_time();
 
     auto result = zimage_set.merge_images(invert_z, {0, 0, 0, 0});
 
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
-    t1 = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - t1).count() / 1000.0;
     std::cout << "Pixel blending done! Elapsed time: " << duration << std::endl;
+    t1 = get_time();
 
     // Rescale output image if neccessary
     if (bool(out_res_x * out_res_y))
@@ -240,50 +117,14 @@ int main(int argc, char** argv)
     cv::imwrite(output_png_path, result);
 
     // Print timing
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - t1).count() / 1000.0;
     std::cout << "Image saved! Elapsed time: " << duration << std::endl;
 
     // Print global timing
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count() / 1000.0;
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - start_time).count() / 1000.0;
     std::cout << "Processing done! Cumulative elapsed time: " << duration << std::endl;
 
-    // result.save_as_file(output_png_path);
-
-    // std::string rgb01 = "e:/Programming/projects/cpp/zmerger/tests/simple_test_2x2_rgb_01.png";
-    // std::string z01 = "e:/Programming/projects/cpp/zmerger/tests/simple_test_2x2_z_01.png";
-    // std::string rgb02 = "e:/Programming/projects/cpp/zmerger/tests/simple_test_2x2_rgb_02.png";
-    // std::string z02 = "e:/Programming/projects/cpp/zmerger/tests/simple_test_2x2_z_02.png";
-    // auto zmi01 = ZMergerImage(rgb01, z01, BlendMode::NORMAL);
-    // auto zmi02 = ZMergerImage(rgb02, z02, BlendMode::NORMAL);
-
-    // print_mat(zmi01.data);
-    // print_mat(zmi02.data);
-
-    // rgbazm_ background_pixel{0.9, 0.9, 0.9, 0.75, 0, static_cast<float>(BlendMode::NORMAL)};
-
-    // cv::Mat_<rgbazm_> m1(1, 1);
-    // cv::Mat_<rgbazm_> m2(1, 1);
-    // cv::Mat_<rgbazm_> m3(1, 1);
-
-    // m1(0, 0) = {0.5, 0, 0, 0.1, 9, static_cast<float>(BlendMode::MULTIPLY)};
-    // m2(0, 0) = {0, 0.5, 0, 0.1, 8, static_cast<float>(BlendMode::MULTIPLY)};
-    // m3(0, 0) = {0, 0, 0.5, 0.5, 7, static_cast<float>(BlendMode::MULTIPLY)};
-
-    // std::cout << format(m1, cv::Formatter::FMT_PYTHON) << std::endl;
-    // std::cout << format(m2, cv::Formatter::FMT_PYTHON) << std::endl;
-    // std::cout << format(m3, cv::Formatter::FMT_PYTHON) << std::endl;
-
-    // std::vector<rgbazm_*> pixel_stack(2);
-    // pixel_stack[0] = &(m1(0, 0));
-    // pixel_stack[1] = &(m2(0, 0));
-    // // pixel_stack[2] = &(m3(0, 0));
-
-    // auto result = blend_pixel_stack(pixel_stack, background_pixel);
-
-    // std::cout << "background pixel " << background_pixel << std::endl;
-    // std::cout << "result " << result << std::endl;
 }
-
 
 int main__(int argc, char **argv)
 {
@@ -331,10 +172,10 @@ int main__(int argc, char **argv)
     }
 
     // Starting global time tracking
-    auto start_time = std::chrono::high_resolution_clock::now();
+    auto start_time = get_time();
 
     // Starting time tracking for images reading process
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = get_time();
 
     // Reading the first image to get the resolution
     cv::Mat rgba_image = cv::imread(IMAGES_DATA_INFO[0]["I"].string_value(), CV_LOAD_IMAGE_UNCHANGED);
@@ -433,8 +274,8 @@ int main__(int argc, char **argv)
     }
 
     // Print timing
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
-    t1 = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - t1).count() / 1000.0;
+    t1 = get_time();
     std::cout << "Images are loaded! Elapsed time: " << duration << std::endl;
 
     // Generate sorting map
@@ -471,8 +312,8 @@ int main__(int argc, char **argv)
     }
 
     // Print timing
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
-    t1 = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - t1).count() / 1000.0;
+    t1 = get_time();
     std::cout << "Sorting map generated! Elapsed time: " << duration << std::endl;
 
     std::vector<uint16_t> output_buffer(image_height*image_width * 4, 0);
@@ -543,8 +384,8 @@ int main__(int argc, char **argv)
     }
 
     // Print timing
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
-    t1 = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - t1).count() / 1000.0;
+    t1 = get_time();
     std::cout << "Pixel blending done! Elapsed time: " << duration << std::endl;
 
     // Create output image buffer
@@ -562,11 +403,11 @@ int main__(int argc, char **argv)
     cv::imwrite(output_png_path, output_image);
 
     // Print timing
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - t1).count() / 1000.0;
     std::cout << "Image saved! Elapsed time: " << duration << std::endl;
 
     // Print global timing
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count() / 1000.0;
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - start_time).count() / 1000.0;
     std::cout << "Processing done! Cumulative elapsed time: " << duration << std::endl;
 
     return 0;

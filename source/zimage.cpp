@@ -179,8 +179,6 @@ ZImageSet::merge_images(bool invert_z, cv::Vec<uint16_t, 4> background={0, 0, 0,
                     [&zvalues](unsigned char a, unsigned char b){return zvalues[a]<zvalues[b];}
                 );
 
-
-
             // // Blend the images
             for (auto k : sorting_vector)
             {

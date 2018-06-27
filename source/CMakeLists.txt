@@ -10,15 +10,6 @@ set(CMAKE_INCLUDE_CURRENT_DIR)
 # set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 17)
 
-message("${MSVC}")
-message("${MSVC}")
-message("${MSVC}")
-message("${MSVC}")
-message("${MSVC}")
-message("${MSVC}")
-message("${MSVC}")
-message("${MSVC}")
-
 if (MSVC)
     
     # Include dirs
