@@ -2,35 +2,30 @@
 // // Date   :: Februar 2018
 // // Author :: Alexander Kasperovich
 
-#define DBL_EPSILON 2.2204460492503131e-16
+#include "image_reader.hpp"
+#include "utilities.hpp"
+#include "zimage.hpp"
+#include "json11.hpp"
 
-// #include <iostream>
-// int main()
-// {
-//     std::cout << "asdfasdfasdf" << std::endl;
-// };
-
-#include "image_reader.h"
+// #define DBL_EPSILON 2.2204460492503131e-16
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
-#include "json11.hpp"
 
 #include <algorithm>
-#include <functional>
 #include <cfloat>
 #include <chrono>
 #include <fstream>
+#include <functional>
+#include <iomanip>
 #include <iostream>
 #include <map>
+#include <math.h>
 #include <numeric>
 #include <omp.h>
 #include <vector>
-#include <iomanip>
-#include <cmath>
 
-// using rgbazm_ = cv::Vec<float, 6>;
-using rgbazm_ = cv::Vec<double, 6>;
+using rgbazm_ = cv::Vec<float, 6>;
 
 struct rgbazm
 {
@@ -39,15 +34,6 @@ struct rgbazm
     unsigned char m;
 };
 
-auto lstrip(std::string s) -> std::string {
-
-    s.erase(
-        s.begin(),
-        std::find_if(s.begin(), s.end(), [](int ch) {return !std::isspace(ch); })
-    );
-
-    return s;
-}
 
 auto z_sorter = [](rgbazm_ a, rgbazm_ b) {
     return (a)[4] < (b)[4];
@@ -67,14 +53,14 @@ blend_pixels(rgbazm_& a, rgbazm_& b, rgbazm_& result)
     if (dst_alpha == 0)
     {
         result = a;
-        result[5] = static_cast<float>(MODE::NORMAL);
+        result[5] = static_cast<float>(BlendMode::NORMAL);
         return;
     }
     // Early termination in case of white alpha
     else if (dst_alpha == 1)
     {   
         result = b;
-        result[5] = static_cast<float>(MODE::NORMAL);
+        result[5] = static_cast<float>(BlendMode::NORMAL);
         return;
     }
 
@@ -85,7 +71,7 @@ blend_pixels(rgbazm_& a, rgbazm_& b, rgbazm_& result)
     float dst_value; // r/g/b value
 
     float blending_function_result;
-    auto mode = static_cast<MODE>(b[5]); // mode value
+    auto mode = static_cast<BlendMode>(static_cast<int>(b[5])); // mode value
 
     for (unsigned char channel = 0; channel < 3; ++channel)
     {
@@ -94,19 +80,19 @@ blend_pixels(rgbazm_& a, rgbazm_& b, rgbazm_& result)
         dst_value = b[channel]; // r/g/b value
 
         // Normal mode
-        if (mode == MODE::NORMAL)
+        if (mode == BlendMode::NORMAL)
         {
             blending_function_result = dst_value;
         }
 
         // Multiply mode
-        else if (mode == MODE::MULTIPLY)
+        else if (mode == BlendMode::MULTIPLY)
         {
             blending_function_result = src_value * dst_value;
         }
 
         // Screen mode
-        else if (mode == MODE::SCREEN)
+        else if (mode == BlendMode::SCREEN)
         {
             blending_function_result = src_value + dst_value - src_value * dst_value;
         }
@@ -116,7 +102,7 @@ blend_pixels(rgbazm_& a, rgbazm_& b, rgbazm_& result)
 
     result[3] = out_alpha;
     result[4] = b[4]; // Z-Depth
-    result[5] = static_cast<float>(MODE::NORMAL);
+    result[5] = static_cast<float>(BlendMode::NORMAL);
 }
 
 rgbazm_
@@ -150,12 +136,12 @@ blend_images(std::vector<ZMergerImage> images, rgbazm_ background_pixel, bool in
         sorter = z_sorter;
 
     #pragma omp parallel for
-    for (size_t i = 0; i < rows; ++i)
+    for (int i = 0; i < rows; ++i)
     {
         std::vector<rgbazm_> pixel_stack(images.size());
-        for (size_t j = 0; j < cols; ++j)
+        for (int j = 0; j < cols; ++j)
         {
-            for (size_t k = 0; k < images.size(); ++k)
+            for (int k = 0; k < images.size(); ++k)
             {
                 pixel_stack[k] = images[k].data(i, j);
             }
@@ -167,15 +153,6 @@ blend_images(std::vector<ZMergerImage> images, rgbazm_ background_pixel, bool in
 
     return result;
 
-}
-
-void
-print_mat(cv::Mat mat, std::string prefix="matrix:")
-{
-    cv::Ptr<cv::Formatter> formatMat=cv::Formatter::get(cv::Formatter::FMT_PYTHON);
-    formatMat->set64fPrecision(1);
-    formatMat->set32fPrecision(1);
-    std::cout << std::fixed << prefix << std::endl << formatMat->format(mat) << std::endl;
 }
 
 
@@ -202,19 +179,10 @@ int main(int argc, char** argv)
         out_res_y = std::stoi(std::string(argv[6]));
     }
 
-    // auto output_png_path = "e:/Programming/projects/cpp/zmerger/build/output_new_algorithm.png";
-    // bool invert_z = true;
-    // bool expand_z = false;
-    // std::string json_file_path = "e:/Programming/projects/cpp/zmerger/tests/simple_test_high_res/images_data.json";
-    // std::string json_file_path = "e:/Programming/projects/cpp/zmerger/tests/simple_test_low_res/images_data_repetitions.json";
-    // std::string json_file_path = "E:/Programming/projects/cpp/zmerger/tests/simple_test_circles/images_data.json";
-
-
     // Get the data from json file
-    std::ifstream json_file(json_file_path);
-
     std::string json_string;
     std::string tmp_str;
+    std::ifstream json_file(json_file_path);
     while (std::getline(json_file, tmp_str))
         if (lstrip(tmp_str).substr(0, 2) != "//")
         {
@@ -237,24 +205,18 @@ int main(int argc, char** argv)
     // Starting time tracking for images reading process
     auto t1 = std::chrono::high_resolution_clock::now();
 
-    std::vector<ZMergerImage> zmerger_images;
-    zmerger_images.reserve(images_count);
+    ZImageSet zimage_set;
+    zimage_set.z_images.reserve(images_count);
+
     #pragma omp parallel for
-    for (size_t k=0; k<images_count; ++k)
+    for (int k=0; k<images_count; ++k)
     {
-        {
-            // auto zmi = ZMergerImage(
-            //         IMAGES_DATA_INFO[k]["I"].string_value(),
-            //         IMAGES_DATA_INFO[k]["Z"].string_value(),
-            //         static_cast<MODE>(std::stoi(IMAGES_DATA_INFO[k]["M"].string_value()))
-            // );
-            // zmerger_images.push_back(zmi);
-            zmerger_images.emplace_back(ZMergerImage(
-                    IMAGES_DATA_INFO[k]["I"].string_value(),
-                    IMAGES_DATA_INFO[k]["Z"].string_value(),
-                    static_cast<MODE>(std::stoi(IMAGES_DATA_INFO[k]["M"].string_value()))
-            ));
-        }
+        zimage_set.z_images.emplace_back(
+            ZImage(
+                IMAGES_DATA_INFO[k]["I"].string_value(),
+                IMAGES_DATA_INFO[k]["Z"].string_value(),
+                static_cast<BlendMode>(std::stoi(IMAGES_DATA_INFO[k]["M"].string_value())))
+            );
     }
 
     // Print timing
@@ -262,11 +224,28 @@ int main(int argc, char** argv)
     t1 = std::chrono::high_resolution_clock::now();
     std::cout << "Images are loaded! Elapsed time: " << duration << std::endl;
 
-    auto result = blend_images(zmerger_images, {1, 1, 1, 0, 0, 0}, invert_z);
+    auto result = zimage_set.merge_images(invert_z, {0, 0, 0, 0});
 
     duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
     t1 = std::chrono::high_resolution_clock::now();
     std::cout << "Pixel blending done! Elapsed time: " << duration << std::endl;
+
+    // Rescale output image if neccessary
+    if (bool(out_res_x * out_res_y))
+    {
+        cv::Size size(out_res_x, out_res_y);
+        cv::resize(result, result, size, 0, 0, cv::INTER_CUBIC);
+    }
+
+    cv::imwrite(output_png_path, result);
+
+    // Print timing
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t1).count() / 1000.0;
+    std::cout << "Image saved! Elapsed time: " << duration << std::endl;
+
+    // Print global timing
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count() / 1000.0;
+    std::cout << "Processing done! Cumulative elapsed time: " << duration << std::endl;
 
     // result.save_as_file(output_png_path);
 
@@ -274,21 +253,21 @@ int main(int argc, char** argv)
     // std::string z01 = "e:/Programming/projects/cpp/zmerger/tests/simple_test_2x2_z_01.png";
     // std::string rgb02 = "e:/Programming/projects/cpp/zmerger/tests/simple_test_2x2_rgb_02.png";
     // std::string z02 = "e:/Programming/projects/cpp/zmerger/tests/simple_test_2x2_z_02.png";
-    // auto zmi01 = ZMergerImage(rgb01, z01, MODE::NORMAL);
-    // auto zmi02 = ZMergerImage(rgb02, z02, MODE::NORMAL);
+    // auto zmi01 = ZMergerImage(rgb01, z01, BlendMode::NORMAL);
+    // auto zmi02 = ZMergerImage(rgb02, z02, BlendMode::NORMAL);
 
     // print_mat(zmi01.data);
     // print_mat(zmi02.data);
 
-    // rgbazm_ background_pixel{0.9, 0.9, 0.9, 0.75, 0, static_cast<float>(MODE::NORMAL)};
+    // rgbazm_ background_pixel{0.9, 0.9, 0.9, 0.75, 0, static_cast<float>(BlendMode::NORMAL)};
 
     // cv::Mat_<rgbazm_> m1(1, 1);
     // cv::Mat_<rgbazm_> m2(1, 1);
     // cv::Mat_<rgbazm_> m3(1, 1);
 
-    // m1(0, 0) = {0.5, 0, 0, 0.1, 9, static_cast<float>(MODE::MULTIPLY)};
-    // m2(0, 0) = {0, 0.5, 0, 0.1, 8, static_cast<float>(MODE::MULTIPLY)};
-    // m3(0, 0) = {0, 0, 0.5, 0.5, 7, static_cast<float>(MODE::MULTIPLY)};
+    // m1(0, 0) = {0.5, 0, 0, 0.1, 9, static_cast<float>(BlendMode::MULTIPLY)};
+    // m2(0, 0) = {0, 0.5, 0, 0.1, 8, static_cast<float>(BlendMode::MULTIPLY)};
+    // m3(0, 0) = {0, 0, 0.5, 0.5, 7, static_cast<float>(BlendMode::MULTIPLY)};
 
     // std::cout << format(m1, cv::Formatter::FMT_PYTHON) << std::endl;
     // std::cout << format(m2, cv::Formatter::FMT_PYTHON) << std::endl;

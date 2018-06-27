@@ -1,7 +1,8 @@
 #pragma once
 
+#include <opencv2/core.hpp>
+
 #include <chrono>
-// #include <filesystem>
 #include <iostream>
 #include <string>
 
@@ -32,3 +33,7 @@ get_time();
 
 std::chrono::milliseconds
 time_from(std::chrono::time_point<std::chrono::steady_clock> time_point);
+
+void print_mat(cv::Mat, std::string);
+
+std::string lstrip(std::string s);

@@ -1,13 +1,23 @@
 cmake_minimum_required(VERSION 3.10)
 
-SET(CMAKE_C_COMPILER "c:/Program Files/mingw-w64/x86_64-8.1.0-win32-seh-rt_v6-rev0/mingw64/bin/x86_64-w64-mingw32-gcc.exe")
-SET(CMAKE_CXX_COMPILER "c:/Program Files/mingw-w64/x86_64-8.1.0-win32-seh-rt_v6-rev0/mingw64/bin/x86_64-w64-mingw32-g++.exe")
-# SET(CMAKE_C_COMPILER "C:/Program Files (x86)/Microsoft Visual Studio/2017/Community/VC/Tools/MSVC/14.12.25827/bin/Hostx64/x64/cl.exe")
-# SET(CMAKE_CXX_COMPILER "C:/Program Files (x86)/Microsoft Visual Studio/2017/Community/VC/Tools/MSVC/14.12.25827/bin/Hostx64/x64/cl.exe")
+SET(MSVC 1)
+# SET(CMAKE_C_COMPILER "c:/Program Files/mingw-w64/x86_64-8.1.0-win32-seh-rt_v6-rev0/mingw64/bin/x86_64-w64-mingw32-gcc.exe")
+# SET(CMAKE_CXX_COMPILER "c:/Program Files/mingw-w64/x86_64-8.1.0-win32-seh-rt_v6-rev0/mingw64/bin/x86_64-w64-mingw32-g++.exe")
+SET(CMAKE_C_COMPILER "C:/Program Files (x86)/Microsoft Visual Studio/2017/Community/VC/Tools/MSVC/14.12.25827/bin/Hostx64/x64/cl.exe")
+SET(CMAKE_CXX_COMPILER "C:/Program Files (x86)/Microsoft Visual Studio/2017/Community/VC/Tools/MSVC/14.12.25827/bin/Hostx64/x64/cl.exe")
 
 set(CMAKE_INCLUDE_CURRENT_DIR)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 17)
+
+message("${MSVC}")
+message("${MSVC}")
+message("${MSVC}")
+message("${MSVC}")
+message("${MSVC}")
+message("${MSVC}")
+message("${MSVC}")
+message("${MSVC}")
 
 if (MSVC)
     
@@ -16,6 +26,7 @@ if (MSVC)
     list(APPEND INCL_DIRS "C:/Program Files (x86)/Windows Kits/10/Include/10.0.10240.0/ucrt")
     list(APPEND INCL_DIRS "E:/Programming/libraries/cpp/opencv/build/include")
     list(APPEND INCL_DIRS "e:/Programming/libraries/cpp/json11")
+    set(ENV{INCLUDE} "${INCL_DIRS}")
     
     # Lib dirs
     list(APPEND LINK_DIRS "C:/Program Files (x86)/Microsoft Visual Studio/2017/Community/VC/Tools/MSVC/14.12.25827/lib/x64")
@@ -25,7 +36,8 @@ if (MSVC)
     list(APPEND LINK_DIRS "C:/Program Files (x86)/Windows Kits/10/lib/10.0.16299.0/ucrt/x64")
     list(APPEND LINK_DIRS "C:/Program Files (x86)/Windows Kits/10/lib/10.0.16299.0/um/x64")
     list(APPEND LINK_DIRS "e:/Programming/libraries/cpp/opencv/build/x64/vc15/lib")
-    
+    set(ENV{LIB} "${LINK_DIRS}")
+
     # Activate openmp
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /openmp")
 
@@ -82,7 +94,7 @@ else (MSVC) # Expecting mingw gcc here
     # Mingw make path
     set (ENV{PATH} "$ENV{PATH};c:/Program Files/mingw-w64/x86_64-8.1.0-win32-seh-rt_v6-rev0/mingw64/bin")
     
-    endif(MSVC)
+endif(MSVC)
 
 # Project
 project(${EXEFILE})

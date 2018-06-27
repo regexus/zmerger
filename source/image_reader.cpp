@@ -1,5 +1,5 @@
-#include "image_reader.h"
-#include "utilities.h"
+#include "image_reader.hpp"
+#include "utilities.hpp"
 
 #include <opencv2/core/traits.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -9,8 +9,7 @@
 
 // Reads the image file and converts
 // it's values to double in [0, 1] range.
-cv::Mat
-read_and_normalize(std::string image_path)
+cv::Mat read_and_normalize(std::string image_path)
 {
     // auto open_start_time = get_time();
     auto cv_mat = cv::imread(image_path, cv::IMREAD_UNCHANGED);
@@ -28,46 +27,8 @@ read_and_normalize(std::string image_path)
     return cv_mat;
 }
 
-// Prepares the matrix for saving as an image, 
-// does necessary values conversion
-// depending on the map type.
-cv::Mat
-remap_to_uint16(cv::Mat source_mat, MapType map_type)
-{
-    auto uint16_map = cv::Mat(source_mat.clone());
-
-    if (map_type == MapType::HEIGHT || map_type == MapType::REFLECTION)
-    {
-        uint16_map = uint16_map*MAX_16_BIT_VALUE;
-        uint16_map.convertTo(uint16_map, CV_16U);
-        cv::cvtColor(uint16_map, uint16_map, cv::COLOR_GRAY2BGR);
-    }
-
-    else if (map_type == MapType::NORMAL)
-    {
-        uint16_map = (uint16_map + 1.0)/2*MAX_16_BIT_VALUE;
-    }
-
-    else if (map_type == MapType::DIFFUSE)
-    {
-        uint16_map = uint16_map*MAX_16_BIT_VALUE;
-    }
-
-    uint16_map.convertTo(uint16_map, CV_16UC3);
-
-    return uint16_map;
-}
-
-DirectionalLightSourceData::DirectionalLightSourceData(
-    cv::Vec3d lightDirection, std::string image_path
-)
-{
-    this->lightDirection = lightDirection/cv::norm(lightDirection);
-    this->imageMatrix = read_and_normalize(image_path);
-}
-
 template <typename RGBA_TYPE>
-void fill_data(cv::Mat& rgba_mat, cv::Mat& z_mat, cv::Mat_<rgbazm_>& data, MODE mode)
+void fill_data(cv::Mat& rgba_mat, cv::Mat& z_mat, cv::Mat_<rgbazm_>& data, BlendMode mode)
 {
     for (size_t i = 0; i<rgba_mat.rows; ++i)
     {
@@ -93,7 +54,7 @@ ZMergerImage::ZMergerImage(size_t rows, size_t cols)
     data = cv::Mat_<rgbazm_>(rows, cols);
 }
 
-ZMergerImage::ZMergerImage(std::string rgba_file_path, std::string z_file_path, MODE mode)
+ZMergerImage::ZMergerImage(std::string rgba_file_path, std::string z_file_path, BlendMode mode)
 {
 
     auto rgba_mat = read_and_normalize(rgba_file_path);
