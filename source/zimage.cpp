@@ -226,12 +226,14 @@ ZImageSet::expand_z(bool inverted_z)
 {
     auto ellipse_kernel = cv::getStructuringElement(
         cv::MorphShapes::MORPH_ELLIPSE, cv::Size(2, 2));
-    for (auto &z_image : z_images)
+    
+    #pragma omp parallel for
+    for (int i = 0; i < z_images.size(); ++i)
     {
         if (inverted_z)
-            cv::erode(z_image.z_mat, z_image.z_mat, ellipse_kernel);
+            cv::erode(z_images[i].z_mat, z_images[i].z_mat, ellipse_kernel);
         else
-            cv::dilate(z_image.z_mat, z_image.z_mat, ellipse_kernel);
+            cv::dilate(z_images[i].z_mat, z_images[i].z_mat, ellipse_kernel);
     }
 }
 
