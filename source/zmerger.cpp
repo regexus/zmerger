@@ -1,12 +1,12 @@
-// // Name   :: Z-based pixel blender
-// // Date   :: Februar 2018
-// // Author :: Alexander Kasperovich
+// Name   :: Z-based pixel merger
+// Date   :: Juli 2018
+// Author :: Alexander Kasperovich
 
 #include "utilities.hpp"
 #include "zimage.hpp"
 #include "json11.hpp"
 
-// #define DBL_EPSILON 2.2204460492503131e-16
+#include <cfloat> // for DBL_EPSILON
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -56,19 +56,10 @@ int main(int argc, char** argv)
         out_res_y = std::stoi(std::string(argv[6]));
     }
 
-    // Get the data from json file
-    std::string json_string;
-    std::string tmp_str;
-    std::ifstream json_file(json_file_path);
-    while (std::getline(json_file, tmp_str))
-        if (lstrip(tmp_str).substr(0, 2) != "//")
-        {
-            json_string += tmp_str;
-        }
-
+    auto json_string = read_json_string(json_file_path);
     std::string error_message;
     json11::Json IMAGES_DATA_INFO = json11::Json::parse(json_string, error_message);
-    size_t images_count = IMAGES_DATA_INFO.array_items().size();
+    unsigned char images_count = IMAGES_DATA_INFO.array_items().size();
     if (images_count == 0)
     {
         std::cout << json_string << std::endl;
@@ -82,28 +73,36 @@ int main(int argc, char** argv)
     // Starting time tracking for images reading process
     auto t1 = get_time();
 
-    ZImageSet zimage_set;
-    zimage_set.z_images.reserve(images_count);
+    auto zimage_set = ZImageSet(images_count);
+    
+    if (!zimage_set.resolution_check())
+    {
+        throw std::runtime_error("Resolution error! Input images have different resolutions.");
+    }
 
+    // Reading the source images
     #pragma omp parallel for
     for (int k=0; k<images_count; ++k)
     {
-        zimage_set.z_images.emplace_back(
-            ZImage(
+        zimage_set.z_images[k] = ZImage(
                 IMAGES_DATA_INFO[k]["I"].string_value(),
                 IMAGES_DATA_INFO[k]["Z"].string_value(),
-                static_cast<BlendMode>(std::stoi(IMAGES_DATA_INFO[k]["M"].string_value())))
-            );
+                static_cast<BlendMode>(std::stoi(IMAGES_DATA_INFO[k]["M"].string_value()))
+        );
     }
 
+    // Expand the z-pass if needed.
+    if (expand_z)
+        zimage_set.expand_z(invert_z);
+
     // Print timing
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - t1).count() / 1000.0;
+    auto duration = (get_time() - t1).count() / 1000.0;
     std::cout << "Images are loaded! Elapsed time: " << duration << std::endl;
     t1 = get_time();
 
     auto result = zimage_set.merge_images(invert_z, {0, 0, 0, 0});
 
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - t1).count() / 1000.0;
+    duration = (get_time() - t1).count() / 1000.0;
     std::cout << "Pixel blending done! Elapsed time: " << duration << std::endl;
     t1 = get_time();
 
@@ -114,16 +113,16 @@ int main(int argc, char** argv)
         cv::resize(result, result, size, 0, 0, cv::INTER_CUBIC);
     }
 
+    // Save the result
     cv::imwrite(output_png_path, result);
 
     // Print timing
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - t1).count() / 1000.0;
+    duration = (get_time() - t1).count() / 1000.0;
     std::cout << "Image saved! Elapsed time: " << duration << std::endl;
 
     // Print global timing
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(get_time() - start_time).count() / 1000.0;
+    duration = (get_time() - start_time).count() / 1000.0;
     std::cout << "Processing done! Cumulative elapsed time: " << duration << std::endl;
-
 }
 
 int main__(int argc, char **argv)

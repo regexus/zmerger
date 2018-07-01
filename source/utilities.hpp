@@ -6,6 +6,8 @@
 #include <iostream>
 #include <string>
 
+// Printing
+
 template <typename T>
 void print_(T input)
 {
@@ -28,12 +30,21 @@ void print(Args... args)
     std::cout << std::endl;
 }
 
-std::chrono::time_point<std::chrono::steady_clock>
+// Timing
+
+std::chrono::time_point<std::chrono::steady_clock, std::chrono::milliseconds>
 get_time();
 
 std::chrono::milliseconds
-time_from(std::chrono::time_point<std::chrono::steady_clock> time_point);
+time_from(std::chrono::time_point<std::chrono::steady_clock, std::chrono::milliseconds> time_point);
 
-void print_mat(cv::Mat, std::string);
+// Strings
 
 std::string lstrip(std::string s);
+
+std::string
+read_json_string(std::string json_file_path);
+
+// Debugging
+
+void print_mat(cv::Mat, std::string);

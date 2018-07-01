@@ -1,19 +1,17 @@
 #pragma once
 
-#include "enums_and_consts.hpp"
+#include "enums.hpp"
+#include "consts.hpp"
 
-// #define DBL_EPSILON 2.2204460492503131e-16
 #include <opencv2/core.hpp>
 
 class ZImage
 {
-    private: 
+    public:
 
     cv::Mat_<cv::Vec<uint16_t, 4>> rgba_mat;
     cv::Mat_<cv::Vec<uint16_t, 1>> z_mat;
     BlendMode mode = BlendMode::NORMAL;
-
-    public:
 
     size_t width;
     size_t height;
@@ -36,8 +34,14 @@ class ZImageSet
 
     std::vector<ZImage> z_images;
     
-    ZImageSet();
+    ZImageSet(unsigned short images_count);
+    
+    bool
+    resolution_check();
     
     cv::Mat_<cv::Vec<uint16_t, 4>>
     merge_images(bool invert_z, cv::Vec<float, 4> background);
+
+    void
+    expand_z(bool inverted_z);
 };
