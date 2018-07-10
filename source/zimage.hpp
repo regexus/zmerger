@@ -1,7 +1,7 @@
 #pragma once
 
-#include "enums.hpp"
 #include "consts.hpp"
+#include "enums.hpp"
 
 #include <opencv2/core.hpp>
 
@@ -20,12 +20,12 @@ class ZImage
 
     ZImage(std::string rgba_file_path, std::string z_file_path, BlendMode mode);
 
-    uint16_t& get_r(size_t, size_t);
-    uint16_t& get_g(size_t, size_t);
-    uint16_t& get_b(size_t, size_t);
-    uint16_t& get_a(size_t, size_t);
-    uint16_t& get_z(size_t, size_t);
-    BlendMode get_m(size_t, size_t);
+    uint16_t& get_r(int, int);
+    uint16_t& get_g(int, int);
+    uint16_t& get_b(int, int);
+    uint16_t& get_a(int, int);
+    uint16_t& get_z(int, int);
+    BlendMode get_m(int, int);
 };
 
 class ZImageSet

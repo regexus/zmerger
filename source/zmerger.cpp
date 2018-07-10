@@ -2,17 +2,15 @@
 // Date   :: Juli 2018
 // Author :: Alexander Kasperovich
 
+#include "json11.hpp"
 #include "utilities.hpp"
 #include "zimage.hpp"
-#include "json11.hpp"
 
-#include <cfloat> // for DBL_EPSILON
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
 #include <algorithm>
-#include <cfloat>
 #include <chrono>
 #include <fstream>
 #include <functional>
@@ -34,7 +32,7 @@ int main(int argc, char** argv)
     }
 
     auto json_file_path = std::string(argv[1]);
-    auto output_png_path = std::string(argv[2]);
+    auto output_image_path = std::string(argv[2]);
     bool invert_z = std::stoi(std::string(argv[3]));
     bool expand_z = std::stoi(std::string(argv[4]));
 
@@ -50,7 +48,7 @@ int main(int argc, char** argv)
     auto json_string = read_json_string(json_file_path);
     std::string error_message;
     json11::Json IMAGES_DATA_INFO = json11::Json::parse(json_string, error_message);
-    unsigned char images_count = IMAGES_DATA_INFO.array_items().size();
+    unsigned short images_count = IMAGES_DATA_INFO.array_items().size();
     if (images_count == 0)
     {
         std::cout << json_string << std::endl;
@@ -66,20 +64,21 @@ int main(int argc, char** argv)
 
     auto zimage_set = ZImageSet(images_count);
     
-    if (!zimage_set.resolution_check())
-    {
-        throw std::runtime_error("Resolution error! Input images have different resolutions.");
-    }
-
     // Reading the source images
     #pragma omp parallel for
     for (int k=0; k<images_count; ++k)
-    {
+    {   
         zimage_set.z_images[k] = ZImage(
                 IMAGES_DATA_INFO[k]["I"].string_value(),
                 IMAGES_DATA_INFO[k]["Z"].string_value(),
                 static_cast<BlendMode>(std::stoi(IMAGES_DATA_INFO[k]["M"].string_value()))
         );
+    }
+
+    if (!zimage_set.resolution_check())
+    {
+        std::cout << "Resolution error! Input images have different resolutions." << std::endl;
+        return 1;
     }
 
     // Expand the z-pass if needed.
@@ -105,7 +104,7 @@ int main(int argc, char** argv)
     }
 
     // Save the result
-    cv::imwrite(output_png_path, result);
+    cv::imwrite(output_image_path, result);
 
     // Print timing
     duration = (get_time() - t1).count() / 1000.0;

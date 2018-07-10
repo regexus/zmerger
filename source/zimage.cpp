@@ -1,7 +1,7 @@
 #include "zimage.hpp"
-#include "utilities.hpp"
-#include "enums.hpp"
 #include "consts.hpp"
+#include "enums.hpp"
+#include "utilities.hpp"
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -96,10 +96,8 @@ ZImage::ZImage(std::string rgba_file_path, std::string z_file_path, BlendMode mo
     }
 
     // Checking the resolution of rgba and z images
-    if (rgba_mat_.size()!=z_mat_.size())
+    if ((rgba_mat_.rows != z_mat_.rows) || (rgba_mat_.cols != z_mat_.cols))
     {
-        std::cout << rgba_file_path <<"|"<< z_file_path << std::endl;
-        std::cout << rgba_mat_.rows <<"|"<< z_mat_.rows <<"|"<< rgba_mat_.cols <<"|"<< z_mat_.cols << std::endl;
         std::string message = ("Error, resolution missmatch found! "
         "RGBA-image must have the same resolution as Z-image. "
         "Aborting merge process...");
@@ -120,37 +118,37 @@ ZImage::ZImage(std::string rgba_file_path, std::string z_file_path, BlendMode mo
 }
 
 uint16_t& 
-ZImage::get_r(size_t i, size_t j)
+ZImage::get_r(int i, int j)
 {
     return rgba_mat(i, j)[0];
 }
 
 uint16_t& 
-ZImage::get_g(size_t i, size_t j)
+ZImage::get_g(int i, int j)
 {
     return rgba_mat(i, j)[1];
 }
 
 uint16_t& 
-ZImage::get_b(size_t i, size_t j)
+ZImage::get_b(int i, int j)
 {
     return rgba_mat(i, j)[2];
 }
 
 uint16_t& 
-ZImage::get_a(size_t i, size_t j)
+ZImage::get_a(int i, int j)
 {
     return rgba_mat(i, j)[3];
 }
 
 uint16_t& 
-ZImage::get_z(size_t i, size_t j)
+ZImage::get_z(int i, int j)
 {
     return z_mat(i, j)[0];
 }
 
 BlendMode
-ZImage::get_m(size_t i, size_t j)
+ZImage::get_m(int i, int j)
 {
     return mode;
 }
@@ -160,10 +158,10 @@ ZImage::get_m(size_t i, size_t j)
 bool
 ZImageSet::resolution_check()
 {
-    for (unsigned short i;i<z_images.size()-1;++i)
+    for (unsigned short i = 0; i < z_images.size() - 1; ++i)
     {
-        if ((z_images[i].height != z_images[i+1].height) || 
-            (z_images[i].width != z_images[i+1].width))
+        if ((z_images[i].height != z_images[i + 1].height) ||
+            (z_images[i].width != z_images[i + 1].width))
         {
             return false;
         }
@@ -180,8 +178,8 @@ ZImageSet::ZImageSet(unsigned short images_count)
 cv::Mat_<cv::Vec<uint16_t, 4>>
 ZImageSet::merge_images(bool invert_z, cv::Vec<float, 4> background={0, 0, 0, 0})
 {
-    auto height = z_images[0].height;
-    auto width = z_images[0].width;
+    int height = z_images[0].height;
+    int width = z_images[0].width;
     cv::Mat_<cv::Vec<float, 4>> result(height, width, background);
 
     #pragma omp parallel for
@@ -192,14 +190,14 @@ ZImageSet::merge_images(bool invert_z, cv::Vec<float, 4> background={0, 0, 0, 0}
 
         for (int j = 0; j<width; ++j)
         {
-            // Compute sorting indexes
+            // Reset the sorting vector to preserve the order of images
+            std::iota(sorting_vector.begin(), sorting_vector.end(), 0);
+
+            // Collect the z-values
             for (unsigned char m = 0; m < z_images.size(); ++m)
             {
                 zvalues[m] = z_images[m].get_z(i, j);
             }
-
-            // Reset the sorting vector to preserve the order of images
-            std::iota(sorting_vector.begin(), sorting_vector.end(), 0);
 
             if (invert_z)
                 std::stable_sort(sorting_vector.begin(), sorting_vector.end(),
@@ -236,4 +234,3 @@ ZImageSet::expand_z(bool inverted_z)
             cv::dilate(z_images[i].z_mat, z_images[i].z_mat, ellipse_kernel);
     }
 }
-
